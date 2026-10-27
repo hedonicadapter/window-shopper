@@ -1,0 +1,7 @@
+*.db
+*.db-wal
+*.db-shm
+.env
+.venv/
+*.log
+__pycache__/

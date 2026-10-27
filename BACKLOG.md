@@ -4,7 +4,7 @@ Ordered. Top = do first.
 
 ## P0: make it run for real
 
-- [ ] `.env.example`, `requirements.txt`, `.gitignore` (`*.db`, `.env`, `.venv`, `*.log`)
+- [x] `.env.example`, `requirements.txt`, `.gitignore` (`*.db`, `.env`, `.venv`, `*.log`)
 - [ ] eBay OAuth: client-credentials token auto-refresh in `Ebay` adapter (cache in kv table with expiry) instead of static `EBAY_TOKEN`
 - [ ] Vinted: resolve `color_ids` / `size_ids` from name, cache in kv; map `color`/`size` DSL keys automatically
 - [ ] `gone` sweep in `poller.main`: set `gone=1` where `last_seen < now - 3*interval_s` and not starred

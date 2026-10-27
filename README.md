@@ -19,7 +19,7 @@ All three share one `searches.db`. Poller writes, UI and MCP read/write flags.
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
-pip install requests fastapi uvicorn python-multipart mcp
+pip install -r requirements.txt
 cp .env.example .env   # see Env
 python poller.py       # creates db from schema.sql on first run
 uvicorn web:app --port 8080
