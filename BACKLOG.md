@@ -21,7 +21,7 @@ Pick per platform: official API > Apify actor > internal JSON endpoint > HTML sc
 - [ ] poshmark: Apify; condition + color filters are URL params on site
 - [ ] therealreal: scrape, Playwright likely needed
 - [ ] vestiaire: Apify or internal `/api/search` endpoint; note shipping to SE
-- [ ] Per-adapter filter coverage table in README once done
+- [ ] Per-adapter filter coverage table in README: update as adapters land
 
 ## P2: UI
 

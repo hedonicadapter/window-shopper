@@ -26,12 +26,18 @@ def list_searches() -> list[dict]:
 @mcp.tool()
 def create_search(name: str, query: str, platforms: list[str], filters: dict | None = None,
                   interval_s: int = 900) -> int:
-    """Create a saved search. filters keys: price_max, currency, size[], gender, condition[]
-    (new|very_good|good|fair), color[], brand[]. platforms: ebay, vinted, depop, ..."""
+    """Create a saved search. Call filter_fields first: keys and which platforms honour each.
+    List-type fields take arrays. Unsupported keys are stored but ignored."""
     with db() as c:
         cur = c.execute("INSERT INTO saved_search(name,query,platforms,filters,interval_s) VALUES(?,?,?,?,?)",
                         (name, query, json.dumps(platforms), json.dumps(filters or {}), interval_s))
         return cur.lastrowid
+
+@mcp.tool()
+def filter_fields() -> dict:
+    """Filter DSL keys (type, options) and per-platform support."""
+    return {"fields": poller.FIELDS,
+            "platforms": {n: sorted(a.fields) for n, a in poller.ADAPTERS.items()}}
 
 @mcp.tool()
 def update_search(id: int, query: str | None = None, platforms: list[str] | None = None,

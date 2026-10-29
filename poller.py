@@ -21,11 +21,25 @@ class Item:
     @property
     def key(self): return f"{self.platform}:{self.platform_id}"
 
+# ---------- filter DSL ----------
+# type: number | text | list. options: fixed choices. int: list items cast to int.
+FIELDS = {
+    "price_max": {"type": "number", "label": "max price", "hint": "350"},
+    "currency":  {"type": "text", "label": "currency", "hint": "SEK"},
+    "condition": {"type": "list", "label": "condition", "options": ["new", "very_good", "good", "fair"]},
+    "size":      {"type": "list", "label": "size", "hint": "43"},
+    "color":     {"type": "list", "label": "color", "hint": "red"},
+    "color_ids": {"type": "list", "label": "color id", "hint": "12", "int": True},
+    "size_ids":  {"type": "list", "label": "size id", "hint": "784", "int": True},
+}
+
 # ---------- adapters ----------
 # Each: fetch(query:str, f:dict) -> list[Item]. Map normalized filters to native ones.
+# fields: FIELDS keys the adapter honours; drives UI. price_max is post-filtered for all.
 
 class Ebay:
     name = "ebay"
+    fields = {"price_max", "currency", "condition", "color", "size"}
     COND = {"new": "1000", "very_good": "3000", "good": "4000", "fair": "5000"}
     def fetch(self, q, f):
         flt = []
@@ -54,6 +68,7 @@ class Ebay:
 class Vinted:
     """Internal catalog endpoint; undocumented, needs session cookie from a GET on the site."""
     name = "vinted"
+    fields = {"price_max", "condition", "color_ids", "size_ids"}
     HOST = "https://www.vinted.se"
     COND = {"new": 6, "very_good": 1, "good": 2, "fair": 3}  # status_ids
     def _session(self):
@@ -80,8 +95,9 @@ class Vinted:
 class Apify:
     """Generic: run an actor synchronously, map dataset rows. Use for depop/grailed/mercari/poshmark/
     therealreal/vestiaire. Actor ids + field map are config, not code."""
-    def __init__(self, name, actor, build_input, map_row):
+    def __init__(self, name, actor, build_input, map_row, fields=("price_max",)):
         self.name, self.actor, self.build_input, self.map_row = name, actor, build_input, map_row
+        self.fields = set(fields)
     def fetch(self, q, f):
         r = requests.post(f"https://api.apify.com/v2/acts/{self.actor}/run-sync-get-dataset-items",
                           params={"token": os.environ["APIFY_TOKEN"], "timeout": 120},

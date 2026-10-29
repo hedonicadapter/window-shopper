@@ -78,11 +78,23 @@ Stored as JSON in `saved_search.filters`. Adapters map what they can, ignore the
 
 `color_ids` / `size_ids` are Vinted-specific numeric ids (per locale). Resolve via `GET /api/v2/colors`, `GET /api/v2/sizes` on vinted.se.
 
+Fields are declared in `poller.FIELDS` (type, label, options); each adapter lists the keys it honours in `fields`. Web UI builds the filter editor from these, showing only fields used by the checked platforms. MCP exposes the same via `filter_fields()`.
+
+| field | ebay | vinted | depop |
+|---|---|---|---|
+| price_max | native | native | post-filter |
+| currency | native | — | — |
+| condition | native | native | — |
+| size | native (US shoe size) | — | — |
+| color | native | — | — |
+| color_ids / size_ids | — | native | — |
+
 ## Adapter contract
 
 ```python
 class X:
     name = "x"
+    fields = {"price_max", "condition"}   # FIELDS keys honoured
     def fetch(self, query: str, filters: dict) -> list[poller.Item]: ...
 ```
 
