@@ -53,7 +53,7 @@ def update_search(id: int, query: str | None = None, platforms: list[str] | None
 
 @mcp.tool()
 def delete_search(id: int) -> str:
-    with db() as c: c.execute("DELETE FROM saved_search WHERE id=?", (id,))
+    with db() as c: poller.delete_search(c, id)
     return "deleted"
 
 @mcp.tool()

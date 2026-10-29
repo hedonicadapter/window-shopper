@@ -3,6 +3,7 @@
 Same DB as poller.py. Views: unseen (since last 'mark seen'), all, starred; filter by search."""
 import json, os, sqlite3
 from html import escape as e
+from urllib.parse import urlparse, parse_qs
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 import poller
@@ -49,7 +50,7 @@ form.s .row button,form.s .ib{padding:2px 8px;border:1px solid var(--line);borde
 .row.unsup .k{text-decoration:line-through}.row.unsup::after{content:"not used by selected platforms";color:var(--mute);font-size:12px}
 form.s select{font:inherit;padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 .err{color:#B3261E;font-size:13px}
-.warn{padding:8px 16px;border-bottom:1px solid var(--line);font-size:13px;color:#B3261E}.warn b{font-weight:600}
+.warn:empty{display:none}.warn{padding:8px 16px;border-bottom:1px solid var(--line);font-size:13px;color:#B3261E}.warn b{font-weight:600}
 ul.ss .st{display:block;font-size:12px;color:var(--mute)}ul.ss .st .bad{color:#B3261E}ul.ss li{flex-wrap:wrap}ul.ss .nm{flex:1}
 form.s label.off{color:var(--mute)}form.s label.off small{font-size:12px}
 """
@@ -80,7 +81,8 @@ form.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)retur
   if(b.classList.contains('del')){b.closest('.row').remove();refresh()}
   else if(b.classList.contains('x'))b.parentNode.remove();
   else if(b.classList.contains('more')){const k=b.closest('.row').dataset.k;b.previousElementSibling.insertAdjacentHTML('beforeend',val(k,F[k]));b.previousElementSibling.lastElementChild.querySelector('input').focus()}});
-form.addEventListener('htmx:beforeRequest',e=>{if(!sel().length){e.preventDefault();err.textContent='Pick at least one platform.'}});
+form.addEventListener('htmx:beforeRequest',e=>{if(e.detail.elt===form&&!sel().length){e.preventDefault();err.textContent='Pick at least one platform.'}});
+form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form&&e.detail.successful){form.reset();rows.innerHTML='';refresh()}});
 refresh();
 })();"""
 
@@ -102,8 +104,9 @@ def parse_filters(items):
 def short_err(s):
     return (s or "").split(" for url")[0]
 
-def run_status(runs):
-    """Latest run_log row per platform -> one status line."""
+def run_status(runs, platforms):
+    """Latest run_log row per current platform -> one status line."""
+    runs = [r for r in runs or [] if r["platform"] in platforms]
     if not runs: return '<span class="st">not polled yet</span>'
     parts = [f'{e(r["platform"])} ✓ {r["n_total"]} found, {r["n_new"]} new' if r["ok"]
              else f'<span class="bad">{e(r["platform"])} ✗ {e(short_err(r["error"]))}</span>' for r in runs]
@@ -125,6 +128,15 @@ def card(r):
 <div class="acts"><button class="s" hx-post="/l/{e(r['key'])}/star" hx-target="#c-{e(r['key'])}" hx-swap="outerHTML">★</button>
 <button hx-post="/l/{e(r['key'])}/dismiss" hx-target="#c-{e(r['key'])}" hx-swap="delete">hide</button></div></div></div>"""
 
+# Search actions swap list + header/warn/count/grid only; keeps form input and <details> state
+SWAP = 'hx-target="#ss" hx-select="#ss" hx-swap="outerHTML" hx-select-oob="#hdr,#warn,#cnt,#grid"'
+
+def current(request):
+    """Re-render for the view the htmx request came from."""
+    q = parse_qs(urlparse(request.headers.get("HX-Current-URL", "")).query)
+    view = q.get("view", ["new"])[0]
+    return index(view if view in ("new", "all", "starred") else "new", int(q.get("s", ["0"])[0] or 0))
+
 @app.get("/", response_class=HTMLResponse)
 def index(view: str = "new", s: int = 0):
     with db() as c:
@@ -144,13 +156,14 @@ def index(view: str = "new", s: int = 0):
     for r in runs: by_search.setdefault(r["search_id"], []).append(r)
     live = {r["id"] for r in searches if r["active"]}
     fails = {}
+    plats_of = {r["id"]: json.loads(r["platforms"]) for r in searches}
     for r in runs:
-        if not r["ok"] and r["search_id"] in live: fails.setdefault(r["platform"], short_err(r["error"]))
-    warn = ('<div class="warn">Polling failing: ' + " · ".join(f"<b>{e(p)}</b> {e(m)}" for p, m in fails.items())
-            + ' — see manage searches</div>') if fails else ""
-    slist = "".join(f'<li><span class="nm">{e(r["name"])} <code>{e(r["query"])} · {e(", ".join(json.loads(r["platforms"])))} · {e(fmt_filters(json.loads(r["filters"])))}</code>{run_status(by_search.get(r["id"]))}</span>'
-                    f'<form hx-post="/s/{r["id"]}/toggle" hx-target="body"><button>{"pause" if r["active"] else "resume"}</button></form>'
-                    f'<form hx-post="/s/{r["id"]}/delete" hx-confirm="Delete {e(r["name"])}?" hx-target="body"><button>delete</button></form></li>' for r in searches)
+        if not r["ok"] and r["search_id"] in live and r["platform"] in plats_of[r["search_id"]]: fails.setdefault(r["platform"], short_err(r["error"]))
+    warn = ('Polling failing: ' + " · ".join(f"<b>{e(p)}</b> {e(m)}" for p, m in fails.items())
+            + ' — see manage searches') if fails else ""
+    slist = "".join(f'<li><span class="nm">{e(r["name"])} <code>{e(r["query"])} · {e(", ".join(json.loads(r["platforms"])))} · {e(fmt_filters(json.loads(r["filters"])))}</code>{run_status(by_search.get(r["id"]), plats_of[r["id"]])}</span>'
+                    f'<form hx-post="/s/{r["id"]}/toggle" {SWAP}><button>{"pause" if r["active"] else "resume"}</button></form>'
+                    f'<form hx-post="/s/{r["id"]}/delete" hx-confirm="Delete {e(r["name"])}?" {SWAP}><button>delete</button></form></li>' for r in searches)
     plats = "".join(f'<label class=off><input type=checkbox disabled>{e(n)} <small>(needs {e(", ".join(m))})</small></label>'
                     if (m := poller.missing(a)) else f'<label><input type=checkbox name=platforms value="{e(n)}">{e(n)}</label>'
                     for n, a in poller.ADAPTERS.items())
@@ -158,21 +171,21 @@ def index(view: str = "new", s: int = 0):
     body = "".join(card(r) for r in rows) or f'<div class="empty">{"No listings yet. New searches are polled within a minute; check status under manage searches." if not n_listings else "Nothing new since last visit." if view=="new" else "Nothing here."}</div>'
     return f"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>searches</title><style>{CSS}</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.4/htmx.min.js"></script><body>
-<header><h1>Saved searches</h1>{tab("new", f'<span class="new">{n_new} new</span>')}{tab("all","all")}{tab("starred","starred")}
+<header id="hdr"><h1>Saved searches</h1>{tab("new", f'<span class="new">{n_new} new</span>')}{tab("all","all")}{tab("starred","starred")}
 <span style="width:10px"></span><a class="tab{' on' if not s else ''}" href="/?view={view}">every search</a>{stabs}
-<form hx-post="/seen" hx-target="body" style="margin-left:auto"><button class="tab" type=submit>mark all seen</button></form></header>
-{warn}<details><summary>manage searches ({len(searches)})</summary>
-<form class="s" hx-post="/s" hx-target="body"><input name=name placeholder="name" required><input name=query placeholder="query e.g. red boots" required>
+<form hx-post="/seen" hx-target="#grid" hx-select="#grid" hx-swap="outerHTML" hx-select-oob="#hdr" style="margin-left:auto"><button class="tab" type=submit>mark all seen</button></form></header>
+<div class="warn" id="warn">{warn}</div><details><summary id="cnt">manage searches ({len(searches)})</summary>
+<form class="s" hx-post="/s" {SWAP}><input name=name placeholder="name" required><input name=query placeholder="query e.g. red boots" required>
 <label>poll every <input name=interval_s type=number min=60 value=900 style="width:90px"> s</label>
 <fieldset><legend>platforms</legend>{plats}</fieldset>
 <fieldset><legend>filters</legend><div class="rows"></div><select class="add"></select></fieldset>
-<span class="err"></span><button>Save search</button></form><ul class="ss">{slist}</ul></details>
-<div class="grid">{body}</div>{jscript("fields", poller.FIELDS)}{jscript("support", support)}<script>{FORM_JS}</script></body>"""
+<span class="err"></span><button>Save search</button></form><ul class="ss" id="ss">{slist}</ul></details>
+<div class="grid" id="grid">{body}</div>{jscript("fields", poller.FIELDS)}{jscript("support", support)}<script>{FORM_JS}</script></body>"""
 
 @app.post("/seen", response_class=HTMLResponse)
-def seen():
+def seen(request: Request):
     with db() as c: c.execute("INSERT OR REPLACE INTO kv VALUES('last_visit', datetime('now'))")
-    return index()
+    return current(request)
 
 @app.post("/s", response_class=HTMLResponse)
 async def create(request: Request):
@@ -183,17 +196,17 @@ async def create(request: Request):
             c.execute("INSERT INTO saved_search(name,query,platforms,filters,interval_s) VALUES(?,?,?,?,?)",
                       (form["name"], form["query"], json.dumps(platforms), json.dumps(parse_filters(form.multi_items())),
                        int(form.get("interval_s") or 900)))
-    return index()
+    return current(request)
 
 @app.post("/s/{sid}/toggle", response_class=HTMLResponse)
-def toggle(sid: int):
+def toggle(sid: int, request: Request):
     with db() as c: c.execute("UPDATE saved_search SET active=1-active WHERE id=?", (sid,))
-    return index()
+    return current(request)
 
 @app.post("/s/{sid}/delete", response_class=HTMLResponse)
-def delete(sid: int):
-    with db() as c: c.execute("DELETE FROM saved_search WHERE id=?", (sid,))
-    return index()
+def delete(sid: int, request: Request):
+    with db() as c: poller.delete_search(c, sid)
+    return current(request)
 
 @app.post("/l/{key}/star", response_class=HTMLResponse)
 def star(key: str):

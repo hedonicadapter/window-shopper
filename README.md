@@ -62,7 +62,8 @@ Remote: `MCP_TRANSPORT=streamable-http`, reverse proxy + bearer, add as custom c
 | `DB` | all | path to sqlite, default `searches.db` |
 | `EBAY_TOKEN` | poller | OAuth client-credentials, scope `https://api.ebay.com/oauth/api_scope`; expires 2h, see backlog |
 | `APIFY_TOKEN` | poller | for Apify-backed adapters |
-| `VINTED_COOKIE` | poller | optional; `_vinted_fr_session=...` from browser, avoids 403 |
+| `VINTED_COOKIE` | poller | optional; whole `Cookie` header of a vinted.se request from DevTools, avoids 403 |
+| `VINTED_UA` | poller | `User-Agent` of that same browser; cookie is rejected with a different UA |
 | `NTFY_TOPIC` | poller | full URL e.g. `https://ntfy.sh/<secret>` |
 | `MCP_TRANSPORT` | mcp | `stdio` (default) or `streamable-http` |
 

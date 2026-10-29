@@ -76,7 +76,8 @@ class Vinted:
     COND = {"new": 6, "very_good": 1, "good": 2, "fair": 3}  # status_ids
     def _session(self):
         s = requests.Session()
-        s.headers["User-Agent"] = "Mozilla/5.0"
+        # Cookie is bound to the browser that issued it; VINTED_UA should be that browser's User-Agent
+        s.headers["User-Agent"] = os.environ.get("VINTED_UA", "Mozilla/5.0")
         if c := os.environ.get("VINTED_COOKIE"): s.headers["Cookie"] = c
         else: s.get(self.HOST, timeout=30)  # sets _vinted_fr_session cookie
         return s
@@ -87,9 +88,10 @@ class Vinted:
         # color_ids / size_ids are numeric per-locale; resolve once via /api/v2/colors, /api/v2/sizes
         if f.get("color_ids"): params["color_ids[]"] = f["color_ids"]
         if f.get("size_ids"):  params["size_ids[]"] = f["size_ids"]
-        r = self._session().get(f"{self.HOST}/api/v2/catalog/items", params=params, timeout=30)
+        r = self._session().get(f"{self.HOST}/api/v2/catalog/items", params=params, timeout=30,
+                               headers={"Accept": "application/json, text/plain, */*"})
         if r.status_code in (401, 403) or "json" not in r.headers.get("content-type", ""):
-            raise RuntimeError(f"{r.status_code} blocked (non-JSON or denied); set VINTED_COOKIE from a browser session")
+            raise RuntimeError(f"{r.status_code} blocked (non-JSON or denied); set VINTED_COOKIE and VINTED_UA from the same browser")
         r.raise_for_status()
         return [Item("vinted", str(it["id"]), it["url"], it.get("title", ""),
                      float(it["price"]["amount"]), it["price"]["currency_code"],
@@ -123,6 +125,13 @@ ADAPTERS = {a.name: a for a in [
 ]}
 
 # ---------- core ----------
+def delete_search(db, sid):
+    # No FK enforcement on connections; cascade by hand so reused ids start clean
+    db.execute("DELETE FROM price_history WHERE key IN (SELECT key FROM listing WHERE search_id=?)", (sid,))
+    db.execute("DELETE FROM listing WHERE search_id=?", (sid,))
+    db.execute("DELETE FROM run_log WHERE search_id=?", (sid,))
+    db.execute("DELETE FROM saved_search WHERE id=?", (sid,))
+
 def missing(ad):
     return [v for v in ad.needs if not os.environ.get(v)]
 
