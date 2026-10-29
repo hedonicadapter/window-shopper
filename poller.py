@@ -141,9 +141,13 @@ def run_search(db, s):
     db.commit()
     notify(s, new_items)
 
-def main():
+def connect():
     db = sqlite3.connect(DB); db.row_factory = sqlite3.Row
     db.executescript(open(os.path.join(os.path.dirname(__file__), "schema.sql")).read())
+    return db
+
+def main():
+    db = connect()
     due = db.execute("""SELECT * FROM saved_search WHERE active=1 AND
                         (last_run IS NULL OR strftime('%s','now')-strftime('%s',last_run) >= interval_s)""").fetchall()
     for s in due: run_search(db, dict(s))

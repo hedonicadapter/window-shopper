@@ -11,11 +11,24 @@ schema.sql      SQLite schema (saved_search, listing, price_history, run_log)
 poller.py       adapters + diff + notify; run from cron
 web.py          FastAPI + htmx UI (new / all / starred, star, hide, CRUD searches)
 mcp_server.py   FastMCP server over same db + ad-hoc cross-platform search
+cli.py          entry point: serve (web + poll loop) | web | poll | mcp
+flake.nix       `nix run` packaging
 ```
 
 All three share one `searches.db`. Poller writes, UI and MCP read/write flags.
 
-## Setup
+## Run with Nix
+
+```sh
+nix run github:hedonicadapter/window-shopper          # web UI on :8080 + poll loop, one process
+nix run github:hedonicadapter/window-shopper#poll     # one poll pass (for cron/systemd timer)
+nix run github:hedonicadapter/window-shopper#mcp      # MCP server
+nix run github:hedonicadapter/window-shopper#web      # web UI only
+```
+
+DB defaults to `$XDG_DATA_HOME/resale-watch/searches.db` (`~/.local/share/...`). `HOST`/`PORT` set bind (default `127.0.0.1:8080`). `POLL_TICK_S` (default 60) sets how often the loop checks for due searches; per-search `interval_s` decides when a search actually fires. Other env as below.
+
+## Setup (without Nix)
 
 ```sh
 python -m venv .venv && . .venv/bin/activate
