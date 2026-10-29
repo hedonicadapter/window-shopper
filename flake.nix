@@ -28,7 +28,7 @@
         });
 
       apps = forAll (pkgs:
-        let bin = "${self.packages.${pkgs.system}.default}/bin/resale-watch";
+        let bin = "${self.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/resale-watch";
             app = cmd: { type = "app"; program = toString (pkgs.writeShellScript "resale-watch-${cmd}" ''exec ${bin} ${cmd} "$@"''); };
         in {
           default = { type = "app"; program = bin; };
