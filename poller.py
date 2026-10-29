@@ -36,9 +36,11 @@ FIELDS = {
 # ---------- adapters ----------
 # Each: fetch(query:str, f:dict) -> list[Item]. Map normalized filters to native ones.
 # fields: FIELDS keys the adapter honours; drives UI. price_max is post-filtered for all.
+# needs: env vars required; adapter skipped with logged error if unset.
 
 class Ebay:
     name = "ebay"
+    needs = ("EBAY_TOKEN",)
     fields = {"price_max", "currency", "condition", "color", "size"}
     COND = {"new": "1000", "very_good": "3000", "good": "4000", "fair": "5000"}
     def fetch(self, q, f):
@@ -68,6 +70,7 @@ class Ebay:
 class Vinted:
     """Internal catalog endpoint; undocumented, needs session cookie from a GET on the site."""
     name = "vinted"
+    needs = ()
     fields = {"price_max", "condition", "color_ids", "size_ids"}
     HOST = "https://www.vinted.se"
     COND = {"new": 6, "very_good": 1, "good": 2, "fair": 3}  # status_ids
@@ -85,6 +88,8 @@ class Vinted:
         if f.get("color_ids"): params["color_ids[]"] = f["color_ids"]
         if f.get("size_ids"):  params["size_ids[]"] = f["size_ids"]
         r = self._session().get(f"{self.HOST}/api/v2/catalog/items", params=params, timeout=30)
+        if r.status_code in (401, 403) or "json" not in r.headers.get("content-type", ""):
+            raise RuntimeError(f"{r.status_code} blocked (non-JSON or denied); set VINTED_COOKIE from a browser session")
         r.raise_for_status()
         return [Item("vinted", str(it["id"]), it["url"], it.get("title", ""),
                      float(it["price"]["amount"]), it["price"]["currency_code"],
@@ -97,7 +102,7 @@ class Apify:
     therealreal/vestiaire. Actor ids + field map are config, not code."""
     def __init__(self, name, actor, build_input, map_row, fields=("price_max",)):
         self.name, self.actor, self.build_input, self.map_row = name, actor, build_input, map_row
-        self.fields = set(fields)
+        self.fields, self.needs = set(fields), ("APIFY_TOKEN",)
     def fetch(self, q, f):
         r = requests.post(f"https://api.apify.com/v2/acts/{self.actor}/run-sync-get-dataset-items",
                           params={"token": os.environ["APIFY_TOKEN"], "timeout": 120},
@@ -118,6 +123,9 @@ ADAPTERS = {a.name: a for a in [
 ]}
 
 # ---------- core ----------
+def missing(ad):
+    return [v for v in ad.needs if not os.environ.get(v)]
+
 def notify(search, items):
     if not (t := os.environ.get("NTFY_TOPIC")) or not items: return
     body = "\n".join(f"{i.platform} {i.price:g} {i.currency} — {i.title[:60]}\n{i.url}"
@@ -129,8 +137,8 @@ def run_search(db, s):
     for pf in json.loads(s["platforms"]):
         ad = ADAPTERS.get(pf)
         if not ad: continue
-        t0 = time.time()
         try:
+            if miss := missing(ad): raise RuntimeError(f"{', '.join(miss)} not set")
             items = ad.fetch(s["query"], f)
         except Exception as e:
             db.execute("INSERT INTO run_log(search_id,platform,ok,error) VALUES(?,?,0,?)", (s["id"], pf, str(e)[:500]))

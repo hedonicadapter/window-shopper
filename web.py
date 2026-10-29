@@ -33,7 +33,7 @@ h1{font-size:17px;font-weight:600;margin:0 12px 0 0}a{color:inherit}
 .card .pf{position:absolute;top:8px;left:8px;background:var(--bg);font-size:11px;padding:2px 7px;border-radius:4px}
 .acts{display:flex;gap:4px;margin-top:6px}.acts button{flex:1;border:1px solid var(--line);background:none;color:var(--ink);padding:4px;border-radius:5px;font-size:13px;cursor:pointer}
 .card.star .acts .s{background:var(--star);color:#fff;border-color:var(--star)}
-.empty{padding:40px 16px;color:var(--mute)}
+.empty{grid-column:1/-1;padding:24px 0;color:var(--mute)}
 details{padding:10px 16px;border-bottom:1px solid var(--line)}summary{cursor:pointer;color:var(--mute)}
 form.s{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:640px;margin-top:10px}form.s input,form.s textarea{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 form.s textarea,form.s button{grid-column:1/-1}form.s button{padding:8px;border:0;border-radius:6px;background:var(--ink);color:var(--bg);font:inherit;cursor:pointer}
@@ -49,6 +49,9 @@ form.s .row button,form.s .ib{padding:2px 8px;border:1px solid var(--line);borde
 .row.unsup .k{text-decoration:line-through}.row.unsup::after{content:"not used by selected platforms";color:var(--mute);font-size:12px}
 form.s select{font:inherit;padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 .err{color:#B3261E;font-size:13px}
+.warn{padding:8px 16px;border-bottom:1px solid var(--line);font-size:13px;color:#B3261E}.warn b{font-weight:600}
+ul.ss .st{display:block;font-size:12px;color:var(--mute)}ul.ss .st .bad{color:#B3261E}ul.ss li{flex-wrap:wrap}ul.ss .nm{flex:1}
+form.s label.off{color:var(--mute)}form.s label.off small{font-size:12px}
 """
 
 FORM_JS = """(()=>{
@@ -96,6 +99,16 @@ def parse_filters(items):
         else: out[k] = v
     return out
 
+def short_err(s):
+    return (s or "").split(" for url")[0]
+
+def run_status(runs):
+    """Latest run_log row per platform -> one status line."""
+    if not runs: return '<span class="st">not polled yet</span>'
+    parts = [f'{e(r["platform"])} ✓ {r["n_total"]} found, {r["n_new"]} new' if r["ok"]
+             else f'<span class="bad">{e(r["platform"])} ✗ {e(short_err(r["error"]))}</span>' for r in runs]
+    return f'<span class="st">{" · ".join(parts)} · {e(runs[0]["started"])} UTC</span>'
+
 def jscript(id, obj):
     s = json.dumps(obj).replace("</", "<\\/")
     return f'<script type="application/json" id="{id}">{s}</script>'
@@ -121,21 +134,34 @@ def index(view: str = "new", s: int = 0):
         args = [lv]
         if s: where += " AND search_id=?"; args.append(s)
         rows = c.execute(f"SELECT * FROM listing WHERE {where} ORDER BY first_seen DESC LIMIT 300", args).fetchall()
+        runs = c.execute("""SELECT * FROM run_log WHERE id IN (SELECT MAX(id) FROM run_log GROUP BY search_id, platform)
+                            ORDER BY started DESC""").fetchall()
+        n_listings = c.execute("SELECT COUNT(*) FROM listing").fetchone()[0]
         n_new = c.execute("SELECT COUNT(*) FROM listing WHERE first_seen > ? AND dismissed=0 AND gone=0", (lv,)).fetchone()[0]
     tab = lambda v, label: f'<a class="tab{" on" if view == v else ""}" href="/?view={v}&s={s}">{label}</a>'
     stabs = "".join(f'<a class="tab{" on" if s == r["id"] else ""}" href="/?view={view}&s={r["id"]}">{e(r["name"])}</a>' for r in searches)
-    slist = "".join(f'<li>{e(r["name"])} <code>{e(r["query"])} · {e(", ".join(json.loads(r["platforms"])))} · {e(fmt_filters(json.loads(r["filters"])))}</code>'
+    by_search = {}
+    for r in runs: by_search.setdefault(r["search_id"], []).append(r)
+    live = {r["id"] for r in searches if r["active"]}
+    fails = {}
+    for r in runs:
+        if not r["ok"] and r["search_id"] in live: fails.setdefault(r["platform"], short_err(r["error"]))
+    warn = ('<div class="warn">Polling failing: ' + " · ".join(f"<b>{e(p)}</b> {e(m)}" for p, m in fails.items())
+            + ' — see manage searches</div>') if fails else ""
+    slist = "".join(f'<li><span class="nm">{e(r["name"])} <code>{e(r["query"])} · {e(", ".join(json.loads(r["platforms"])))} · {e(fmt_filters(json.loads(r["filters"])))}</code>{run_status(by_search.get(r["id"]))}</span>'
                     f'<form hx-post="/s/{r["id"]}/toggle" hx-target="body"><button>{"pause" if r["active"] else "resume"}</button></form>'
                     f'<form hx-post="/s/{r["id"]}/delete" hx-confirm="Delete {e(r["name"])}?" hx-target="body"><button>delete</button></form></li>' for r in searches)
-    plats = "".join(f'<label><input type=checkbox name=platforms value="{e(n)}">{e(n)}</label>' for n in poller.ADAPTERS)
+    plats = "".join(f'<label class=off><input type=checkbox disabled>{e(n)} <small>(needs {e(", ".join(m))})</small></label>'
+                    if (m := poller.missing(a)) else f'<label><input type=checkbox name=platforms value="{e(n)}">{e(n)}</label>'
+                    for n, a in poller.ADAPTERS.items())
     support = {n: sorted(a.fields) for n, a in poller.ADAPTERS.items()}
-    body = "".join(card(r) for r in rows) or f'<div class="empty">{"Nothing new since last visit." if view=="new" else "Nothing here."}</div>'
+    body = "".join(card(r) for r in rows) or f'<div class="empty">{"No listings yet. New searches are polled within a minute; check status under manage searches." if not n_listings else "Nothing new since last visit." if view=="new" else "Nothing here."}</div>'
     return f"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>searches</title><style>{CSS}</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.4/htmx.min.js"></script><body>
 <header><h1>Saved searches</h1>{tab("new", f'<span class="new">{n_new} new</span>')}{tab("all","all")}{tab("starred","starred")}
 <span style="width:10px"></span><a class="tab{' on' if not s else ''}" href="/?view={view}">every search</a>{stabs}
 <form hx-post="/seen" hx-target="body" style="margin-left:auto"><button class="tab" type=submit>mark all seen</button></form></header>
-<details><summary>manage searches ({len(searches)})</summary>
+{warn}<details><summary>manage searches ({len(searches)})</summary>
 <form class="s" hx-post="/s" hx-target="body"><input name=name placeholder="name" required><input name=query placeholder="query e.g. red boots" required>
 <label>poll every <input name=interval_s type=number min=60 value=900 style="width:90px"> s</label>
 <fieldset><legend>platforms</legend>{plats}</fieldset>
